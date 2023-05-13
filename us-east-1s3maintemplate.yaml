@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters: # params passed to "--parameter-overrides" in CLI
+    # Bucket Name and It must be same to the Website Domain Name
+    # Website Domain Name
+    # Default is othertreeword.com
+    BucketName:
+      Description: Unique name for your bucket. This will be in the S3 url to your static website.
+      Type: String
+      Default: 'momosalah.live'
+    
+    # Your AWS Route53 Hosted Zone ID related to your Zone "othertreeword.com" 
+    HostedZoneId: 
+      Description: Unique Id for your Hosted Zone
+      Type: String
+      Default: 'Z03837361373DV5WI8T0X'
+   
+
+Resources:
+    # Create an S3 Bucket that serves a static website (i.e. React app)
+    MyBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            BucketName: !Ref BucketName
+            PublicAccessBlockConfiguration:
+              BlockPublicAcls: false
+            OwnershipControls:
+              Rules:
+                - ObjectOwnership: ObjectWriter
+            WebsiteConfiguration: # this makes the S3 Bucket a static website/app
+                IndexDocument: index.html # default object served when visiting S3 domain
+                ErrorDocument: 404.html # just send to app, let React handle errors and routing
+
+    # Add a Bucket Policy that lets public visitors access the web app
+    MyBucketPolicy:
+        Type: AWS::S3::BucketPolicy
+        Properties:
+            Bucket: !Ref MyBucket # attach to bucket being created
+            PolicyDocument:
+                Id: MyPolicy
+                Version: 2012-10-17
+                Statement: # lets the public access/view the contents of your Bucke t, i.e. web app
+                    - Sid: PublicReadForGetBucketObjects
+                      Effect: Allow
+                      Principal: "*" # wildcard, allow all requests
+                      Action: "s3:GetObject"
+                      Resource: 
+                        - !Join ["", [!GetAtt MyBucket.Arn, /*]]
+    AwsAcmCertificate:
+      Type: AWS::CertificateManager::Certificate
+      Properties: 
+        DomainName: !Ref BucketName
+        DomainValidationOptions: 
+          -   DomainName: !Ref BucketName
+              HostedZoneId: !Ref HostedZoneId
+        SubjectAlternativeNames: 
+          - Fn::Join: ["", ["*.", !Ref BucketName]]
+        ValidationMethod: DNS     
+
+    TheCloudFrontDistribution:
+      Type: AWS::CloudFront::Distribution
+      Properties:
+        DistributionConfig:
+          Aliases:
+            - !Ref MyBucket
+            - !Sub "www.${MyBucket}"
+          DefaultCacheBehavior:
+            Compress: true
+            ForwardedValues:
+              QueryString: false
+            TargetOriginId: !Ref BucketName
+            ViewerProtocolPolicy: redirect-to-https
+          DefaultRootObject: index.html
+          CustomErrorResponses:
+            - ErrorCachingMinTTL: 300
+              ErrorCode: 403
+              ResponseCode: 404
+              ResponsePagePath: /404.html
+          Enabled: true
+          HttpVersion: http2
+          Origins:
+            - DomainName: 
+                !Join [ "", [ !Ref MyBucket, ".s3.us-east-1.amazonaws.com" ] ]
+              
+              Id: !Ref BucketName
+              S3OriginConfig:
+                OriginAccessIdentity: ''
+          ViewerCertificate:
+            AcmCertificateArn: !Ref AwsAcmCertificate
+            MinimumProtocolVersion: TLSv1
+            SslSupportMethod: sni-only
+
+    
+    Route53RecordSetGroup:
+      Type: AWS::Route53::RecordSetGroup
+      Properties:
+        # keep the . suffix
+        HostedZoneName: !Sub "${BucketName}."
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-route53-aliastarget.html#cfn-route53-aliastarget-hostedzoneid
+        RecordSets:
+            - Name: !Ref BucketName
+              Type: A
+              AliasTarget:
+                  DNSName: !GetAtt TheCloudFrontDistribution.DomainName
+                  EvaluateTargetHealth: false
+                  HostedZoneId: Z2FDTNDATAQYW2 # leave hardcoded, don't confuse w/ !Ref HostedZoneId, This is the eu-west-2 code 
+            - Name: !Sub "www.${BucketName}"
+              Type: A
+              AliasTarget:
+                  DNSName: !GetAtt TheCloudFrontDistribution.DomainName
+                  EvaluateTargetHealth: false
+                  HostedZoneId: Z2FDTNDATAQYW2 
+
+Outputs:
+    BucketEndpointURL:
+        Value: !GetAtt MyBucket.WebsiteURL
+        Description: Endpoint for website hosted on S3
+    WebsiteDomain:
+        Value: !Ref MyBucket
+        Description: URL for website
