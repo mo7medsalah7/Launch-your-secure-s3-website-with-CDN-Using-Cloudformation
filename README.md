@@ -10,6 +10,9 @@
 1. automates all the required Route53 DNS records
 1. manages redirects with a CloudFront Function
 
+## Diagram
+
+![Diagram for our setup.](/diagram.png)
 
 ## Before Deployment.
 
